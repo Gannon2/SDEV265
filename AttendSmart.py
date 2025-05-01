@@ -1024,7 +1024,7 @@ class AdminView(tk.Frame):
 
         # Queue stats
         stats_frame = tk.LabelFrame(dashboard_frame, text="Queue Statistics", 
-                                  font=self.controller.label_font)
+                                font=self.controller.label_font)
         stats_frame.pack(fill=tk.X, pady=10)
 
         # Get queue data using controller
@@ -1043,16 +1043,24 @@ class AdminView(tk.Frame):
         actions_frame.pack(fill=tk.X, pady=10)
 
         tk.Button(actions_frame, text="View Customer Queue",
-                 command=lambda: self.notebook.select(2),  # Queue tab index
-                 font=self.controller.button_font).pack(pady=5, fill=tk.X)
+                command=lambda: self.notebook.select(2),  # Queue tab index
+                font=self.controller.button_font).pack(pady=5, fill=tk.X)
 
         tk.Button(actions_frame, text="View Customer Database",
-                 command=lambda: self.notebook.select(3),  # Customers tab index
-                 font=self.controller.button_font).pack(pady=5, fill=tk.X)
+                command=lambda: self.notebook.select(3),  # Customers tab index
+                font=self.controller.button_font).pack(pady=5, fill=tk.X)
 
         tk.Button(actions_frame, text="Open Queue Monitor",
-                 command=self.show_monitors_view,
-                 font=self.controller.button_font).pack(pady=5, fill=tk.X)
+                command=self.show_monitors_view,
+                font=self.controller.button_font).pack(pady=5, fill=tk.X)
+
+        # Add logout button to dashboard
+        logout_frame = tk.Frame(dashboard_frame)
+        logout_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        
+        tk.Button(logout_frame, text="Logout",
+                command=lambda: self.controller.show_frame(CustomerView),
+                font=self.controller.button_font).pack(side=tk.RIGHT, padx=10)
 
     def build_reports_tab(self, parent):
         """Build the reports tab with analytics"""
