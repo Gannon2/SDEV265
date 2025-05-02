@@ -768,7 +768,7 @@ class EmployeeView(tk.Frame):
         button_frame.pack(pady=10, fill=tk.X)
         
         actions = [
-            ("Mark as In Process", "In Process"),
+            ("Mark as In Progress", "In Progress"),
             ("Mark as Ready", "Ready"),
             ("Mark as Completed", "Completed"),
             ("Remove from Queue", "remove")
@@ -1030,10 +1030,10 @@ class AdminView(tk.Frame):
         # Get queue data using controller
         queue = self.controller.get_queue_data()
         in_queue = sum(1 for item in queue if item["status"] == "In Queue")
-        in_process = sum(1 for item in queue if item["status"] == "In Process")
+        in_progress = sum(1 for item in queue if item["status"] == "In Progress")
         ready = sum(1 for item in queue if item["status"] == "Ready")
 
-        stats_text = f"In Queue: {in_queue} | In Process: {in_process} | Ready: {ready}"
+        stats_text = f"In Queue: {in_queue} | In Progress: {in_progress} | Ready: {ready}"
         tk.Label(stats_frame, text=stats_text, 
                 font=self.controller.label_font).pack(pady=10)
 
@@ -1181,7 +1181,7 @@ class AdminView(tk.Frame):
         
         actions = [
             ("Mark as Ready", "Ready"),
-            ("Mark as In Process", "In Process"),
+            ("Mark as In Progress", "In Progress"),
             ("Mark as Completed", "Completed"),
             ("Mark as Cancelled", "Cancelled"),
             ("Remove", "remove")
