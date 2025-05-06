@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.font import Font
 import hashlib
+import re
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -15,7 +16,7 @@ class AttendSmartApp:
         self.root.geometry("1000x700")
         
         # Initialize files
-        self.database_file = "database.json"
+        self.database_file = "database.json"  
         self.queue_file = "queue.json"
         self.admins_file = "admins.json"
         self.history_file = "history.json"
@@ -336,26 +337,46 @@ class AttendSmartApp:
                 return customer["name"]
         return None
     
+
     def register_customer(self, phone_number, name):
         """
-        Register new customer in database
-        Returns: True if registered, False if already exists
+        Register new customer in database.
+        Returns: True if registered, False if already exists or invalid format.
+        Accepts various phone formats and stores as digits only.
         """
-        customers = self.get_customer_data()
+        # Accept various formats using regex
+        pattern = re.compile(r'^(\+1\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}$')
         
+        if not pattern.match(phone_number):
+            print("Invalid phone number format.")
+            return False
+
+        # Normalize: remove all non-digit characters
+        digits_only = re.sub(r'\D', '', phone_number)
+
+        # Ensure it's exactly 10 digits (US) after normalization
+        if len(digits_only) == 11 and digits_only.startswith('1'):
+            digits_only = digits_only[1:]
+        if len(digits_only) != 10:
+            print("Phone number must be 10 digits.")
+            return False
+
+        customers = self.get_customer_data()
+
         # Check if phone already exists
         for customer in customers:
-            if customer["phone"] == phone_number:
+            if customer["phone"] == digits_only:
                 return False
-        
+
         # Add new customer
         customers.append({
-            "phone": phone_number,
+            "phone": digits_only,
             "name": name,
             "registration_timestamp": datetime.now().timestamp()
         })
         self.save_customer_data(customers)
         return True
+
 
     def cleanup(self):
         """Clean up scheduled events before closing"""
@@ -437,23 +458,45 @@ class CustomerView(tk.Frame):
         """Handle phone number submission"""
         phone_number = self.phone_entry.get().strip()
         if not phone_number:
-            messagebox.showerror("Error", "Please enter a phone number")
+                messagebox.showerror("Error", "Please enter a phone number")
+                return
+
+        # Validate format using regex
+        pattern = re.compile(r'''
+            ^                   # start of string
+            (?:\+1\s?)?         # optional country code +1
+            (?:\(?\d{3}\)?[\s.-]?)  # area code, with optional parentheses
+            \d{3}[\s.-]?        # first 3 digits
+            \d{4}$              # last 4 digits
+        ''', re.VERBOSE)
+
+        if not pattern.match(phone_number):
+            messagebox.showerror("Error", "Invalid phone number format")
             return
-        
+
+        # Normalize to 10-digit number
+        digits_only = re.sub(r'\D', '', phone_number)
+        if len(digits_only) == 11 and digits_only.startswith('1'):
+            digits_only = digits_only[1:]
+        if len(digits_only) != 10:
+            messagebox.showerror("Error", "Phone number must have exactly 10 digits")
+            return
+
         # Use controller method to lookup customer
-        name = self.controller.lookup_customer(phone_number)
-        
+        name = self.controller.lookup_customer(digits_only)
+
         # Check if already in queue
-        in_queue, queue_data = self.check_if_in_queue(phone_number, name)
-        
+        in_queue, queue_data = self.check_if_in_queue(digits_only, name)
+
         # Clear previous response
         for widget in self.response_frame.winfo_children():
             widget.destroy()
-            
+
         if in_queue:
-            self.show_queue_status(phone_number, name, queue_data)
+            self.show_queue_status(digits_only, name, queue_data)
         else:
-            self.handle_new_queue_entry(phone_number, name)
+            self.handle_new_queue_entry(digits_only, name)
+
 
     def check_if_in_queue(self, phone_number, name):
         """Check if customer is already in queue"""
@@ -560,19 +603,30 @@ class CustomerView(tk.Frame):
                 command=self.register_name).pack()
 
     def register_name(self):
-        """Register new customer and add to queue"""
+        """Register new customer or update name if phone exists, then add to queue"""
         full_name = self.name_entry.get().strip()
         if not full_name or len(full_name.split()) < 2:
             messagebox.showerror("Error", "Please enter both first and last name")
             return
-        
+
         phone_number = self.phone_entry.get().strip()
+
+        # Try to register; if already exists, update name
+        registered = self.controller.register_customer(phone_number, full_name)
         
-        # Use controller method to register customer
-        if self.controller.register_customer(phone_number, full_name):
-            self.add_to_queue(full_name)
-        else:
-            messagebox.showerror("Error", "This phone number is already registered")
+        if not registered:
+            # Phone exists, update the name
+            customers = self.controller.get_customer_data()
+            for customer in customers:
+                if customer["phone"] == phone_number:
+                    customer["name"] = full_name
+                    self.controller.save_customer_data(customers)
+                    break
+            print("⚠️ Existing phone found — name updated.")
+
+        # In either case, add to queue
+        self.add_to_queue(full_name)
+
 
     def add_to_queue(self, name):
         """Add customer to queue using controller method"""
@@ -839,26 +893,10 @@ class EmployeeView(tk.Frame):
             
         if name:
             # Existing customer found
-            self.show_customer_found_response(name)
+            self.show_customer_found_response(phone_number,name)
         else:
             # New customer
             self.show_new_customer_form()
-
-    def show_customer_found_response(self, name):
-        """Display options for existing customer"""
-        tk.Label(self.response_frame, 
-                text=f"Customer Found: {name}", 
-                font=self.controller.label_font).pack(pady=5)
-        
-        tk.Button(self.response_frame, 
-                text="Add to Queue", 
-                font=self.controller.button_font,
-                command=lambda: self.add_to_queue(name)).pack(pady=10)
-        
-        tk.Button(self.response_frame, 
-                text="View Queue", 
-                font=self.controller.button_font,
-                command=self.show_queue_popup).pack(pady=5)
 
     def show_new_customer_form(self):
         """Display form for new customer registration"""
@@ -881,7 +919,7 @@ class EmployeeView(tk.Frame):
                 text="Register & Add to Queue", 
                 font=self.controller.button_font,
                 command=self.register_new_customer).pack(pady=10)
-
+        
     def register_new_customer(self):
         """Handle new customer registration"""
         full_name = self.name_entry.get().strip()
@@ -901,6 +939,93 @@ class EmployeeView(tk.Frame):
         else:
             messagebox.showerror("Error", "This phone number is already registered")
 
+
+    def check_if_in_queue(self, phone_number, name):
+        """Check if customer is already in queue"""
+        if not name:
+            return False, None
+            
+        queue = self.controller.get_queue_data()
+        for idx, item in enumerate(queue):
+            if item["name"] == name:
+                return True, {
+                    "position": idx + 1,
+                    "timestamp": item["timestamp"],
+                    "status": item["status"]
+                }
+        return False, None
+
+    def show_customer_found_response(self, phone_number, existing_name):
+        
+        """Display message and options for existing customer depending on queue status"""
+
+        # Check if customer is already in queue
+        in_queue, queue_data = self.check_if_in_queue(phone_number,existing_name)
+
+        if in_queue:
+            # Just show message — no further actions
+            tk.Label(self.response_frame, 
+                    text=f"Customer '{existing_name}' is already in the queue.",
+                    font=self.controller.label_font).pack(pady=10)
+            return  # Stop here
+
+        # Display current name
+        tk.Label(self.response_frame, 
+                text=f"Customer Found: {existing_name}", 
+                font=self.controller.label_font).pack(pady=5)
+
+        # Ask if they want to update the name
+        wants_update = messagebox.askyesno(
+            "Update Name?",
+            f"This number is registered to: '{existing_name}'.\n"
+            "Do you want to update the name?"
+        )
+
+        if wants_update:
+            # Show entry field to edit name
+            tk.Label(self.response_frame, 
+                    text="Enter new name:", 
+                    font=self.controller.label_font).pack()
+
+            name_entry = tk.Entry(self.response_frame, font=self.controller.label_font, justify='center')
+            name_entry.insert(0, existing_name)
+            name_entry.pack(pady=5)
+
+            def update_and_queue():
+                new_name = name_entry.get().strip()
+                if len(new_name.split()) < 2:
+                    messagebox.showerror("Error", "Please enter full name (first and last)")
+                    return
+                if new_name and new_name != existing_name:
+                    customers = self.controller.get_customer_data()
+                    for customer in customers:
+                        if customer["phone"] == phone_number:
+                            customer["name"] = new_name
+                            self.controller.save_customer_data(customers)
+                            messagebox.showinfo("Updated", f"Name updated to '{new_name}'")
+                            break
+                    self.add_to_queue(new_name)
+                else:
+                    self.add_to_queue(existing_name)
+
+            tk.Button(self.response_frame, 
+                    text="Add to Queue", 
+                    font=self.controller.button_font,
+                    command=update_and_queue).pack(pady=10)
+
+        else:
+            # If not updating, just offer to add to queue
+            tk.Button(self.response_frame, 
+                    text="Add to Queue", 
+                    font=self.controller.button_font,
+                    command=lambda: self.add_to_queue(existing_name)).pack(pady=10)
+
+        # View Queue button (always available if not in queue)
+        tk.Button(self.response_frame, 
+                text="View Queue", 
+                font=self.controller.button_font,
+                command=self.show_queue_popup).pack(pady=5)
+        
     def add_to_queue(self, name):
         """Add customer to queue using controller method"""
         added, status = self.controller.add_customer_to_queue(name)
@@ -910,27 +1035,29 @@ class EmployeeView(tk.Frame):
             widget.destroy()
             
         if added:
+            # Successfully added to queue
             tk.Label(self.response_frame, 
-                    text=f"{name} added to queue successfully", 
-                    font=self.controller.label_font).pack(pady=10)
+                    text=f"{name} has been added to the queue.",
+                    font=self.controller.label_font).pack()
             
-            # Show queue button
-            tk.Button(self.response_frame, 
-                     text="View Current Queue", 
-                     font=self.controller.button_font,
-                     command=self.show_queue_popup).pack(pady=5)
+            # Show back button
+            self.back_button.pack(pady=10)
             
             # Refresh queue display
-            self.refresh_queue()
+            self.refresh_queue_view()
         else:
+            # Already in queue
             tk.Label(self.response_frame, 
-                    text=f"{name} is already in queue (Status: {status})", 
-                    font=self.controller.label_font).pack(pady=10)
+                    text=f"{name} is already in the queue (Status: {status})",
+                    font=self.controller.label_font).pack()
             
-            tk.Button(self.response_frame, 
-                     text="Refresh Status", 
-                     font=self.controller.button_font,
-                     command=self.check_phone_number).pack(pady=5)
+            button_frame = tk.Frame(self.response_frame)
+            button_frame.pack(pady=10)
+            
+            tk.Button(button_frame, text="Refresh Status",
+                    font=self.controller.button_font,
+                    command=lambda: self.check_phone_number()).pack(side=tk.LEFT, padx=5)
+
 
     def show_queue_popup(self):
         """Display queue in popup window"""
@@ -1289,36 +1416,214 @@ class AdminView(tk.Frame):
             
             self.customers_tree.insert('', tk.END, values=(phone, name, date))
 
-    def build_add_customer_tab(self, parent):
-        """Build the customer registration tab"""
-        form_frame = tk.Frame(parent)
-        form_frame.pack(pady=20)
+    def build_add_customer_tab(self, tab):
+        """Build the customer registration interface"""
+
+        # Phone number label
+        tk.Label(tab, 
+                text="Customer Phone Number", 
+                font=self.controller.label_font).pack(pady=10)
+
+        # Phone number entry field
+        self.phone_entry = tk.Entry(tab, 
+                                    font=self.controller.label_font, 
+                                    justify='center')
+        self.phone_entry.pack(pady=5, ipady=5, fill=tk.X, padx=20)
+
+        # Submit button to check phone
+        tk.Button(tab, 
+                text="Check Phone", 
+                font=self.controller.button_font,
+                command=self.check_phone_number).pack(pady=10)
+
+        # Response frame to show customer status or actions
+        self.response_frame = tk.Frame(tab)
+        self.response_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+
+
         
-        # Phone number
-        tk.Label(form_frame, text="Phone Number:", 
-                font=self.controller.label_font).grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.add_phone_entry = tk.Entry(form_frame, 
-                                      font=self.controller.label_font)
-        self.add_phone_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         
-        # Name
-        tk.Label(form_frame, text="Full Name:", 
-                font=self.controller.label_font).grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.add_name_entry = tk.Entry(form_frame, 
-                                     font=self.controller.label_font)
-        self.add_name_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+    def check_phone_number(self):
+        """Check if phone exists in database"""
+        phone_number = self.phone_entry.get().strip()
+        if not phone_number:
+            messagebox.showerror("Error", "Please enter a phone number")
+            return
         
-        # Buttons
-        button_frame = tk.Frame(parent)
-        button_frame.pack(pady=10)
+        # Use controller method to lookup customer
+        name = self.controller.lookup_customer(phone_number)
         
-        tk.Button(button_frame, text="Register Customer",
-                 command=self.register_customer,
-                 font=self.controller.button_font).pack(side=tk.LEFT, padx=5)
+        # Clear previous response
+        for widget in self.response_frame.winfo_children():
+            widget.destroy()
+            
+        if name:
+            # Existing customer found
+            self.show_customer_found_response(phone_number,name)
+        else:
+            # New customer
+            self.show_new_customer_form()
+
+    def show_new_customer_form(self):
+        """Display form for new customer registration"""
+        for widget in self.response_frame.winfo_children():
+            widget.destroy()
+            
+        tk.Label(self.response_frame, 
+                text="New Customer Registration", 
+                font=self.controller.label_font).pack(pady=5)
         
-        tk.Button(button_frame, text="Clear Form",
-                 command=self.clear_add_customer_form,
-                 font=self.controller.button_font).pack(side=tk.LEFT, padx=5)
+        tk.Label(self.response_frame, 
+                text="Full Name (First Last)", 
+                font=self.controller.label_font).pack(pady=5)
+        
+        self.name_entry = tk.Entry(self.response_frame, 
+                                 font=self.controller.label_font)
+        self.name_entry.pack(pady=5, ipady=3, fill=tk.X, padx=20)
+        
+        tk.Button(self.response_frame, 
+                text="Register & Add to Queue", 
+                font=self.controller.button_font,
+                command=self.register_new_customer).pack(pady=10)
+        
+    def register_new_customer(self):
+        """Handle new customer registration"""
+        full_name = self.name_entry.get().strip()
+        phone_number = self.phone_entry.get().strip()
+        
+        if not full_name or len(full_name.split()) < 2:
+            messagebox.showerror("Error", "Please enter both first and last name")
+            return
+            
+        if not phone_number:
+            messagebox.showerror("Error", "Phone number is required")
+            return
+        
+        # Use controller method to register customer
+        if self.controller.register_customer(phone_number, full_name):
+            self.add_to_queue(full_name)
+        else:
+            messagebox.showerror("Error", "This phone number is already registered")
+
+
+    def check_if_in_queue(self, phone_number, name):
+        """Check if customer is already in queue"""
+        if not name:
+            return False, None
+            
+        queue = self.controller.get_queue_data()
+        for idx, item in enumerate(queue):
+            if item["name"] == name:
+                return True, {
+                    "position": idx + 1,
+                    "timestamp": item["timestamp"],
+                    "status": item["status"]
+                }
+        return False, None
+
+    def show_customer_found_response(self, phone_number, existing_name):
+        
+        """Display message and options for existing customer depending on queue status"""
+
+        # Check if customer is already in queue
+        in_queue, queue_data = self.check_if_in_queue(phone_number,existing_name)
+
+        if in_queue:
+            # Just show message — no further actions
+            tk.Label(self.response_frame, 
+                    text=f"Customer '{existing_name}' is already in the queue.",
+                    font=self.controller.label_font).pack(pady=10)
+            return  # Stop here
+
+        # Display current name
+        tk.Label(self.response_frame, 
+                text=f"Customer Found: {existing_name}", 
+                font=self.controller.label_font).pack(pady=5)
+
+        # Ask if they want to update the name
+        wants_update = messagebox.askyesno(
+            "Update Name?",
+            f"This number is registered to: '{existing_name}'.\n"
+            "Do you want to update the name?"
+        )
+
+        if wants_update:
+            # Show entry field to edit name
+            tk.Label(self.response_frame, 
+                    text="Enter new name:", 
+                    font=self.controller.label_font).pack()
+
+            name_entry = tk.Entry(self.response_frame, font=self.controller.label_font, justify='center')
+            name_entry.insert(0, existing_name)
+            name_entry.pack(pady=5)
+
+            def update_and_queue():
+                new_name = name_entry.get().strip()
+                if len(new_name.split()) < 2:
+                    messagebox.showerror("Error", "Please enter full name (first and last)")
+                    return
+                if new_name and new_name != existing_name:
+                    customers = self.controller.get_customer_data()
+                    for customer in customers:
+                        if customer["phone"] == phone_number:
+                            customer["name"] = new_name
+                            self.controller.save_customer_data(customers)
+                            messagebox.showinfo("Updated", f"Name updated to '{new_name}'")
+                            break
+                    self.add_to_queue(new_name)
+                else:
+                    self.add_to_queue(existing_name)
+
+            tk.Button(self.response_frame, 
+                    text="Add to Queue", 
+                    font=self.controller.button_font,
+                    command=update_and_queue).pack(pady=10)
+
+        else:
+            # If not updating, just offer to add to queue
+            tk.Button(self.response_frame, 
+                    text="Add to Queue", 
+                    font=self.controller.button_font,
+                    command=lambda: self.add_to_queue(existing_name)).pack(pady=10)
+
+        # View Queue button (always available if not in queue)
+        tk.Button(self.response_frame, 
+                text="View Queue", 
+                font=self.controller.button_font,
+                command=self.show_queue_popup).pack(pady=5)
+        
+    def add_to_queue(self, name):
+        """Add customer to queue using controller method"""
+        added, status = self.controller.add_customer_to_queue(name)
+        
+        # Clear response area
+        for widget in self.response_frame.winfo_children():
+            widget.destroy()
+            
+        if added:
+            # Successfully added to queue
+            tk.Label(self.response_frame, 
+                    text=f"{name} has been added to the queue.",
+                    font=self.controller.label_font).pack()
+            
+            # Show back button
+            self.back_button.pack(pady=10)
+            
+            # Refresh queue display
+            self.refresh_queue_view()
+        else:
+            # Already in queue
+            tk.Label(self.response_frame, 
+                    text=f"{name} is already in the queue (Status: {status})",
+                    font=self.controller.label_font).pack()
+            
+            button_frame = tk.Frame(self.response_frame)
+            button_frame.pack(pady=10)
+            
+            tk.Button(button_frame, text="Refresh Status",
+                    font=self.controller.button_font,
+                    command=lambda: self.check_phone_number()).pack(side=tk.LEFT, padx=5)
+
 
     def register_customer(self):
         """Register new customer from admin interface"""
