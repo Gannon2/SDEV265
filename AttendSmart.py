@@ -390,6 +390,7 @@ class CustomerView(tk.Frame):
         tk.Frame.__init__(self, parent)
         self.controller = controller
         self.queue_tree = None  # Initialize queue_tree attribute
+        self.last_phone_number = ""  # Store last entered phone number
         self.setup_ui()
 
     def setup_ui(self):
@@ -420,10 +421,20 @@ class CustomerView(tk.Frame):
         self.phone_entry = tk.Entry(self, font=self.controller.label_font, justify='center')
         self.phone_entry.pack(pady=5, ipady=5)
         
-        self.submit_button = tk.Button(self, text="Submit", 
+        # Button frame for Submit and Back buttons
+        self.button_frame = tk.Frame(self)
+        self.button_frame.pack(pady=10)
+        
+        self.submit_button = tk.Button(self.button_frame, text="Submit", 
                                      font=self.controller.button_font, 
                                      command=self.check_phone_number)
-        self.submit_button.pack(pady=10)
+        self.submit_button.pack(side=tk.LEFT, padx=5)
+        
+        self.back_button = tk.Button(self.button_frame, text="Back", 
+                                   font=self.controller.button_font, 
+                                   command=self.show_main_screen)
+        self.back_button.pack(side=tk.LEFT, padx=5)
+        self.back_button.pack_forget()  # Hide initially
         
         # Response area (dynamic content)
         self.response_frame = tk.Frame(self)
@@ -448,18 +459,35 @@ class CustomerView(tk.Frame):
     def show_main_screen(self):
         """Reset the view to initial state"""
         self.phone_entry.delete(0, tk.END)
+        self.last_phone_number = ""
         for widget in self.response_frame.winfo_children():
             widget.destroy()
         self.back_button.pack_forget()
+        
+        # Ensure title is visible (in case it was hidden elsewhere)
         self.title_label.pack(side=tk.LEFT)
-        self.welcome_label.pack(pady=20)
+        
+        # Restore welcome message (only if not visible)
+        if not self.welcome_label.winfo_ismapped():
+            self.welcome_label.pack(pady=20)
+        
+        self.refresh_queue()
 
-    def check_phone_number(self):
+    def check_phone_number(self, phone_number=None):
         """Handle phone number submission"""
-        phone_number = self.phone_entry.get().strip()
+        if phone_number is None:
+            phone_number = self.phone_entry.get().strip()
+            # Store the original phone number for display purposes
+            self.last_phone_number = phone_number
+            # Clear the entry box after submission
+            self.phone_entry.delete(0, tk.END)
+        else:
+            # Use the provided phone number (from refresh)
+            phone_number = phone_number.strip()
+
         if not phone_number:
-                messagebox.showerror("Error", "Please enter a phone number")
-                return
+            messagebox.showerror("Error", "Please enter a phone number")
+            return
 
         # Validate format using regex
         pattern = re.compile(r'''
@@ -482,7 +510,10 @@ class CustomerView(tk.Frame):
             messagebox.showerror("Error", "Phone number must have exactly 10 digits")
             return
 
-        # Use controller method to lookup customer
+        # Store the normalized phone number for database operations
+        self.normalized_phone = digits_only
+
+        # Use controller method to lookup customer with normalized phone
         name = self.controller.lookup_customer(digits_only)
 
         # Check if already in queue
@@ -535,7 +566,11 @@ class CustomerView(tk.Frame):
 
     def show_queue_status(self, phone_number, name, queue_data):
         """Display current queue status for customer"""
-        self.title_label.pack_forget()
+
+        if not phone_number:
+            self.show_main_screen()
+            return
+    
         self.welcome_label.pack_forget()
         
         # Calculate wait time
@@ -572,7 +607,7 @@ class CustomerView(tk.Frame):
         
         tk.Button(button_frame, text="Refresh Status",
                 font=self.controller.button_font,
-                command=lambda: self.check_phone_number()).pack(side=tk.LEFT, padx=5)
+                command=lambda: self.check_phone_number(self.last_phone_number)).pack(side=tk.LEFT, padx=5)
         
         # Show navigation buttons
         self.back_button.pack(pady=10)
@@ -609,7 +644,11 @@ class CustomerView(tk.Frame):
             messagebox.showerror("Error", "Please enter both first and last name")
             return
 
-        phone_number = self.phone_entry.get().strip()
+        # Use the normalized phone number stored earlier
+        phone_number = getattr(self, 'normalized_phone', None)
+        if not phone_number:
+            messagebox.showerror("Error", "Phone number validation failed")
+            return
 
         # Try to register; if already exists, update name
         registered = self.controller.register_customer(phone_number, full_name)
@@ -647,6 +686,8 @@ class CustomerView(tk.Frame):
             
             # Refresh queue display
             self.refresh_queue_view()
+            # Clear the phone entry
+            self.phone_entry.delete(0, tk.END)
         else:
             # Already in queue
             tk.Label(self.response_frame, 
@@ -659,6 +700,8 @@ class CustomerView(tk.Frame):
             tk.Button(button_frame, text="Refresh Status",
                     font=self.controller.button_font,
                     command=lambda: self.check_phone_number()).pack(side=tk.LEFT, padx=5)
+            # Show back button
+            self.back_button.pack(pady=10)
 
     def refresh_queue_view(self):
         """Refresh the queue display on main screen"""
